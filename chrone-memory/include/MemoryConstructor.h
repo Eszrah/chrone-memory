@@ -1,6 +1,6 @@
 #pragma once
 
-namespace CHRONE::MEMORY
+namespace chrone::memory
 {
 
 struct MemoryConstructor
@@ -20,6 +20,7 @@ struct MemoryConstructor
 	inline static void	DestructRange(InstanceCountType count, T* instance);
 };
 
+
 template<
 	class T, 
 	class ...Args>
@@ -30,6 +31,7 @@ MemoryConstructor::Construct(
 {
 	new(instance) T(std::forward<Args>(args)...);
 }
+
 
 template<
 	class T, 
@@ -46,6 +48,7 @@ MemoryConstructor::ConstructRange(
 	}
 }
 
+
 template<class T>
 inline void 
 MemoryConstructor::Destruct(
@@ -53,6 +56,7 @@ MemoryConstructor::Destruct(
 {
 	(*instance).~T();
 }
+
 
 template<class T>
 inline void MemoryConstructor::DestructRange(InstanceCountType count, T * instance)
