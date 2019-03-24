@@ -7,97 +7,119 @@ namespace chrone::memory
 {
 
 DynamicLinearMemoryMapper::BufferNode*
-_AllocateBufferNode(DynamicLinearMemoryMapper mapper, Uint32 blockSize);
+_AllocateBufferNode(LinearAllocatorProxy allocator, Uint32 blockSize);
 
-Char* _MapMemory(Char* memory, Uint32& offset, Uint32 byteCount);
+Char* 
+_MapMemory(Char* memory, Uint32& offset, Uint32 byteCount);
 
-bool _HasEnoughMemory(Uint32 size, Uint32 offset, Uint32 byteCount);
-
+static void
+_Allocate(DynamicLinearMemoryMapper& mapper);
 
 
 void
-LinearMemoryMapperFunc::Initialize(StaticLinearMemoryMapper& mapper,
-	Uint32 blockSize)
+LinearMemoryMapperFunc::Allocate(StaticLinearMemoryMapper& mapper)
 {
-	if (mapper.buffer.memory != nullptr || blockSize == 0u) { return; }
-	mapper.buffer = Buffer{ blockSize, 0u,
-			static_cast<Char*>(mapper.allocatorProxy.Allocate(
-				mapper.allocatorProxy.allocatorData, blockSize)) };
+	Uint32 const size{ mapper.size };
+	Char const* const memory{ mapper.memory };
+
+	if (memory != nullptr || size == 0) { return; }
+
+	Char* const bufferMemory{ static_cast<Char*>(mapper.allocatorProxy.Allocate(
+		mapper.allocatorProxy.allocatorData, size)) };
+
+	mapper.memory = bufferMemory;
+	mapper.offset = bufferMemory == nullptr ? size : 0u;
 }
 
 
 Char*
 LinearMemoryMapperFunc::MapMemory(StaticLinearMemoryMapper& mapper,
-	Uint32 byteCount)
+	Uint32 const byteCount)
 {
-	if (_HasEnoughMemory(mapper.buffer.size, 
-		mapper.buffer.offset, byteCount) == false) { return nullptr; }
+	Uint32 const size{ mapper.size };
 
-	return _MapMemory(mapper.buffer.memory, mapper.buffer.offset, byteCount);
+	if (mapper.memory == nullptr)
+	{
+		Allocate(mapper);
+
+		if (mapper.memory == nullptr) { return nullptr; }
+	}
+
+	if ((size - mapper.offset) < byteCount) { return nullptr; }
+
+	return _MapMemory(mapper.memory, mapper.offset, byteCount);
 }
 
 
 void
 LinearMemoryMapperFunc::Clear(StaticLinearMemoryMapper& mapper)
 {
-	if (mapper.buffer.memory == nullptr) { return; }
-	mapper.buffer.offset = 0;
+	if (mapper.memory == nullptr) { return; }
+	mapper.offset = 0;
 }
 
 
 void
 LinearMemoryMapperFunc::Reset(StaticLinearMemoryMapper& mapper)
 {
-	if (mapper.buffer.memory == nullptr) { return; }
-	mapper.allocatorProxy.Deallocate(
-		mapper.allocatorProxy.allocatorData, mapper.buffer.memory);
-	mapper.buffer = Buffer{};
+	if (mapper.memory == nullptr) { return; }
+	LinearAllocatorProxy const& allocator{ mapper.allocatorProxy };
+	allocator.Deallocate(allocator.allocatorData, mapper.memory);
+	mapper = StaticLinearMemoryMapper{ 0u, allocator };
 }
 
 
 void
-LinearMemoryMapperFunc::Initialize(DynamicLinearMemoryMapper& mapper,
-	Uint32 blockSize)
+LinearMemoryMapperFunc::Allocate(DynamicLinearMemoryMapper& mapper)
 {
-	if (mapper.begin != nullptr) { return; }
+	Uint32 const blockSize{ mapper.blockSize };
 
-	const Uint32	allocatedByteCount{
-	sizeof(DynamicLinearMemoryMapper::BufferNode) + blockSize };
-
-	DynamicLinearMemoryMapper::BufferNode*	bufferNode{ 
-		_AllocateBufferNode(mapper, blockSize) };
-
-	mapper.blockSize = blockSize;
-	mapper.begin = mapper.end = mapper.current = bufferNode;
-	mapper.begin->next = nullptr;
+	if (mapper.begin != nullptr || blockSize == 0u) { return; }
+	_Allocate(mapper);
 }
 
 
 Char*
 LinearMemoryMapperFunc::MapMemory(DynamicLinearMemoryMapper& mapper,
-	Uint32 byteCount)
+	Uint32 const byteCount)
 {
+	Uint32 const blockSize{ mapper.blockSize };
+
+	if (byteCount > blockSize || blockSize == 0u) { return nullptr; }
+
+	if (mapper.begin == nullptr)
+	{
+		_Allocate(mapper);
+		if (mapper.begin == nullptr) { return nullptr; }
+	}
+
 	DynamicLinearMemoryMapper::BufferNode*	mappedBufferNode{ mapper.current };
-	const Uint32	blockSize{ mapper.blockSize };
+	Uint32 const offset{ mappedBufferNode->offset };
 
-	//if (mappedBufferNode == nullptr || 
-	//	_HasEnoughMemory(blockSize, mappedBufferNode->offset, byteCount)
-	//	== false)
-	//{
-	//	mappedBufferNode = mappedBufferNode == nullptr ?
-	//		_AllocateBufferNode(mapper, blockSize) : mappedBufferNode->next;
+	if ((blockSize - offset) < byteCount)
+	{
+		DynamicLinearMemoryMapper::BufferNode*	nextMappedBufferNode{
+			mappedBufferNode->next };
 
-	//	if (mappedBufferNode == nullptr ||
-	//		_HasEnoughMemory(blockSize, mappedBufferNode->offset, byteCount)
-	//		== false)
-	//	{
+		if (nextMappedBufferNode == nullptr)
+		{
+			nextMappedBufferNode =
+				_AllocateBufferNode(mapper.allocatorProxy, blockSize);
 
-	//	}
+			if (nextMappedBufferNode == nullptr) { return nullptr; }
 
-	//	return _MapMemory(mappedBuffer, byteCount);
-	//}
+			mapper.end->next = nextMappedBufferNode;
+			mapper.end = nextMappedBufferNode;
+			mappedBufferNode = nextMappedBufferNode;
+		}
+		else
+		{
+			mappedBufferNode = mappedBufferNode->next;
+		}
+	}
 
-	return nullptr;
+	return _MapMemory(mappedBufferNode->memory,
+		mappedBufferNode->offset, byteCount);
 }
 
 
@@ -135,13 +157,17 @@ LinearMemoryMapperFunc::Reset(DynamicLinearMemoryMapper& mapper)
 	mapper.current = nullptr;
 }
 
-
-bool
-_HasEnoughMemory(Uint32 size,
-	Uint32 offset,
-	Uint32 byteCount)
+static void
+_Allocate(DynamicLinearMemoryMapper& mapper)
 {
-	return size && byteCount && (size - offset) >= byteCount;
+	LinearAllocatorProxy const& allocator{ mapper.allocatorProxy };
+
+	DynamicLinearMemoryMapper::BufferNode* const	bufferNode{
+	_AllocateBufferNode(allocator, mapper.blockSize) };
+
+	mapper.begin = bufferNode;
+	mapper.end = bufferNode;
+	mapper.current = bufferNode;
 }
 
 
@@ -157,14 +183,14 @@ _MapMemory(Char* memory,
 
 
 DynamicLinearMemoryMapper::BufferNode*
-_AllocateBufferNode(DynamicLinearMemoryMapper mapper,
+_AllocateBufferNode(LinearAllocatorProxy allocator,
 	Uint32 blockSize)
 {
 	const Uint32	allocatedByteCount{
-sizeof(DynamicLinearMemoryMapper::BufferNode) + blockSize };
+		sizeof(DynamicLinearMemoryMapper::BufferNode) + blockSize };
 
-	Char*	bufferNodeMemory = static_cast<Char*>(mapper.allocatorProxy.Allocate(
-		mapper.allocatorProxy.allocatorData, allocatedByteCount));
+	Char*	bufferNodeMemory = static_cast<Char*>(allocator.Allocate(
+		allocator.allocatorData, allocatedByteCount));
 
 	Char*	bufferMemory{ bufferNodeMemory +
 		sizeof(DynamicLinearMemoryMapper::BufferNode) };
@@ -172,8 +198,11 @@ sizeof(DynamicLinearMemoryMapper::BufferNode) + blockSize };
 	DynamicLinearMemoryMapper::BufferNode*	bufferNode{
 		reinterpret_cast<DynamicLinearMemoryMapper::BufferNode*>(bufferNodeMemory) };
 
-	bufferNode->offset = 0;
-	bufferNode->memory = bufferMemory;
+	if (bufferNode != nullptr)
+	{
+		*bufferNode = { 0u, bufferMemory, nullptr };
+	}
+
 	return bufferNode;
 }
 

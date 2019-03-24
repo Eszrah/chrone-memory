@@ -7,43 +7,42 @@ namespace chrone::memory
 
 struct StaticLinearMemoryMapper;
 struct DynamicLinearMemoryMapper;
+struct LinearAllocatorProxy;
 
 struct LinearMemoryMapperFunc 
 {
 
-void
-Initialize(StaticLinearMemoryMapper& mapper,
-	Uint32 blockSize);
+static void
+Allocate(StaticLinearMemoryMapper& mapper);
 
 
-Char*
+static Char*
 MapMemory(StaticLinearMemoryMapper& mapper,
-	Uint32 byteCount);
+	Uint32 const byteCount);
 
 
-void
+static void
 Clear(StaticLinearMemoryMapper& mapper);
 
 
-void
+static void
 Reset(StaticLinearMemoryMapper& mapper);
 
 
-void
-Initialize(DynamicLinearMemoryMapper& mapper,
-	Uint32 blockSize);
+static void
+Allocate(DynamicLinearMemoryMapper& mapper);
 
 
-Char*
+static Char*
 MapMemory(DynamicLinearMemoryMapper& mapper,
-	Uint32 byteCount);
+	Uint32 const byteCount);
 
 
-void
+static void
 Clear(DynamicLinearMemoryMapper& mapper);
 
 
-void
+static void
 Reset(DynamicLinearMemoryMapper& mapper);
 
 
